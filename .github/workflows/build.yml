@@ -66,9 +66,15 @@ jobs:
           git clone https://github.com/pisex/SchemaEntity.git
           git -C SchemaEntity fetch --depth 1 origin "$SCHEMAENTITY_REF"
           git -C SchemaEntity checkout "$SCHEMAENTITY_REF"
-          # Wender SDK -> alliedmodders hl2sdk: одинаковый тип под разными именами.
-          sed -i 's/\bNetworkStateChanged_t\b/NetworkStateChangedData/g' SchemaEntity/schemasystem.cpp
-          grep -n "NetworkStateChangedData" SchemaEntity/schemasystem.cpp || true
+          # Wender SDK -> alliedmodders hl2sdk: те же сущности под другими именами.
+          #  NetworkStateChanged_t            == NetworkStateChangedData
+          #  FL_CONTROLLER_FAKECLIENT / FL_PAWN_FAKECLIENT == FL_FAKECLIENT (бит фейк-клиента)
+          grep -rlZ -e 'NetworkStateChanged_t' -e 'FL_CONTROLLER_FAKECLIENT' -e 'FL_PAWN_FAKECLIENT' SchemaEntity \
+            | xargs -0 -r sed -i \
+              -e 's/\bNetworkStateChanged_t\b/NetworkStateChangedData/g' \
+              -e 's/\bFL_CONTROLLER_FAKECLIENT\b/FL_FAKECLIENT/g' \
+              -e 's/\bFL_PAWN_FAKECLIENT\b/FL_FAKECLIENT/g'
+          ! grep -rn -e 'NetworkStateChanged_t' -e 'FL_CONTROLLER_FAKECLIENT' -e 'FL_PAWN_FAKECLIENT' SchemaEntity
           cd "${{ github.workspace }}"
 
       - name: Build CheckCheats
