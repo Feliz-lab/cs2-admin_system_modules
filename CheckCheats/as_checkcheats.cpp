@@ -74,6 +74,7 @@ SH_DECL_MANUALHOOK8_void(CheckTransmit, 13, 0, 0, ISource2GameEntities*, CCheckT
 
 
 void CheckMenu(int iSlot);
+void SuspectMenu(int iSlot); // [PcCheckMenu] меню у вызванного на проверку игрока
 
 CGameEntitySystem* GameEntitySystem()
 {
@@ -101,7 +102,11 @@ void SetStage(int iSlot, int iStage)
 	}
 	if(iStage == 1)
 	{
-		if(g_iTarget[iSlot] != -1) g_pUtils->PrintToChat(g_iTarget[iSlot], g_pAdmin->GetTranslation("CC_Input_Contact"), g_szContactCommand, g_mSocials[g_szSocial[iSlot]].sExample.c_str());
+		if(g_iTarget[iSlot] != -1)
+		{
+			g_pUtils->PrintToChat(g_iTarget[iSlot], g_pAdmin->GetTranslation("CC_Input_Contact"), g_szContactCommand, g_mSocials[g_szSocial[iSlot]].sExample.c_str());
+			SuspectMenu(g_iTarget[iSlot]); // [PcCheckMenu] показать меню проверяемому
+		}
 		g_pUtils->PrintToChat(iSlot, g_pAdmin->GetTranslation("CC_Input_Contact"), g_szContactCommand, g_mSocials[g_szSocial[iSlot]].sExample.c_str());
 	}
 }
@@ -127,6 +132,70 @@ void ResetUserData(int iSlot)
 	g_bAdmin[iSlot] = false;
 	SetStage(iSlot, -1);
 	g_pMenus->ClosePlayerMenu(iSlot);
+}
+
+// [PcCheckMenu] Меню, которое видит вызванный на проверку игрок.
+// Немодальное (без "Назад"/"Выход"), при попытке закрыть — открывается заново.
+// Пункт !contact неактивен (серый), активна только кнопка отказа -> бан на 30 дней.
+void SuspectMenu(int iSlot)
+{
+	if(g_iTarget[iSlot] == -1 || g_bAdmin[iSlot]) return; // только проверяемый игрок
+
+	Menu hMenu;
+	g_pMenus->SetTitleMenu(hMenu, g_pAdmin->GetTranslation("CC_Suspect_Title"));
+
+	char szContactItem[128];
+	g_SMAPI->Format(szContactItem, sizeof(szContactItem), g_pAdmin->GetTranslation("CC_Suspect_Contact"), g_szContactCommand);
+	g_pMenus->AddItemMenu(hMenu, "contact", szContactItem, ITEM_DISABLED);
+
+	g_pMenus->AddItemMenu(hMenu, "refuse", g_pAdmin->GetTranslation("CC_Suspect_Refuse"), ITEM_DEFAULT);
+
+	g_pMenus->SetBackMenu(hMenu, false);
+	g_pMenus->SetExitMenu(hMenu, false);
+	g_pMenus->SetCallback(hMenu, [](const char* szBack, const char* szFront, int iItem, int iSlot) {
+		// проверяемый вышел / проверка закончилась — ничего не перерисовываем
+		if(g_iTarget[iSlot] == -1 || g_bAdmin[iSlot]) return;
+
+		if(iItem >= 7 || !szBack || std::string(szBack) != "refuse")
+		{
+			// нажатие "назад"/"выход" или неактивный пункт — держим окно открытым
+			SuspectMenu(iSlot);
+			return;
+		}
+
+		int iAdmin = g_iTarget[iSlot];
+
+		const int iBanTime = 2592000;               // 30 дней в секундах
+		const char* szReason = "отказ от проверки";
+
+		char szBuffer[128];
+		g_SMAPI->Format(szBuffer, sizeof(szBuffer), "%i %i %s", iSlot, iBanTime, szReason);
+		g_pAdmin->SendAction(iAdmin, "checkcheats", szBuffer);
+
+		if(g_bDB && g_pAdmin->GetMySQLConnection())
+		{
+			char szQuery[1024];
+			g_SMAPI->Format(szQuery, sizeof(szQuery), "INSERT INTO `checkcheats_stats` (\
+				`server_id`, `player_steamid`, `player_name`, `admin_steamid`, `admin_name`, `datestart`, `date_end`, `verdict`, `suspect_discord`) VALUES (\
+				'%i', '%lld', '%s', '%lld', '%s', '%i', '%i', '%s', '%s')",
+				g_iServerID,
+				g_pPlayers->GetSteamID64(iSlot),
+				g_pAdmin->GetMySQLConnection()->Escape(g_pPlayers->GetPlayerName(iSlot)).c_str(),
+				g_pPlayers->GetSteamID64(iAdmin),
+				g_pAdmin->GetMySQLConnection()->Escape(g_pPlayers->GetPlayerName(iAdmin)).c_str(),
+				g_iStart[iSlot],
+				std::time(0),
+				szReason,
+				g_pAdmin->GetMySQLConnection()->Escape(g_szContact[iSlot]).c_str());
+			g_pAdmin->GetMySQLConnection()->Query(szQuery, [](ISQLQuery*){});
+		}
+
+		g_pAdmin->AddPlayerPunishment(iSlot, RT_BAN, iBanTime, szReason, iAdmin);
+
+		ResetUserData(iSlot);
+		ResetUserData(iAdmin);
+	});
+	g_pMenus->DisplayPlayerMenu(hMenu, iSlot);
 }
 
 void SetContact(int iSlot, const char* szContact)
