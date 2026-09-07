@@ -23,16 +23,20 @@ jobs:
 
       - name: Set up dependencies
         env:
-          # Три зависимости зажаты между двумя границами, поэтому пинним все на
-          # одну неделю (начало августа 2025):
-          #  - pisex/SchemaEntity определяет CCheckTransmitInfoHack (нужен для
-          #    OnCheckTransmit в as_checkcheats.cpp) только с 2025-08-01;
-          #  - hl2sdk cs2 удалил tier1/generichash.cpp и tier1.a лишь 2026-07-17
-          #    (эти пути жёстко прописаны в CheckCheats/AMBuildScript и manifests/cs2.json);
-          #  - metamod-source берём той же даты для совместимости с hl2sdk.
-          HL2SDK_CS2_REF: 36df1737c06569474fb232344efa0184e3c924ea   # 2025-08-09
-          MMSOURCE_REF: 2221689ce8928ce2332d4b0414fc3f9939b70e66     # 2025-08-08
-          SCHEMAENTITY_REF: 9ce481ef27678869b2f190fa0ee51aef7738bebb # 2025-08-08
+          # Пинним весь набор на середину октября 2025:
+          #  - as_checkcheats.cpp последний раз менялся 2025-08-01 (добавлен
+          #    OnCheckTransmit + CCheckTransmitInfoHack);
+          #  - pisex/SchemaEntity: только HEAD (окт-2025) одновременно даёт
+          #    CCheckTransmitInfoHack И сам определяет FL_CONTROLLER_FAKECLIENT/
+          #    FL_PAWN_FAKECLIENT (промежуточные августовские коммиты не собираются);
+          #  - hl2sdk cs2 окт-2025: уже новый NetworkStateChangedData API (нужен
+          #    schemasystem.cpp из SchemaEntity), но ещё есть tier1/generichash.cpp
+          #    и lib/linux64/tier1.a (удалены только 2026-07-17), жёстко нужные
+          #    CheckCheats/AMBuildScript + manifests/cs2.json;
+          #  - metamod-source той же даты.
+          HL2SDK_CS2_REF: 84a823db042b49d2f6934b770dafbf3a366cef26   # 2025-10-15
+          MMSOURCE_REF: 4399ff0fd4ad7a6620f6763afe6fc0e30005496a     # 2025-10-15
+          SCHEMAENTITY_REF: e7965b3c83ec684d44584ee6457c5482ee5d9db1 # 2025-10-17
         run: |
           set -eux
           export DEBIAN_FRONTEND=noninteractive
