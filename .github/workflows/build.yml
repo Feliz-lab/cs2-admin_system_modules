@@ -23,17 +23,18 @@ jobs:
 
       - name: Set up dependencies
         env:
-          # Пинним весь набор на середину октября 2025:
-          #  - as_checkcheats.cpp последний раз менялся 2025-08-01 (добавлен
-          #    OnCheckTransmit + CCheckTransmitInfoHack);
-          #  - pisex/SchemaEntity: только HEAD (окт-2025) одновременно даёт
-          #    CCheckTransmitInfoHack И сам определяет FL_CONTROLLER_FAKECLIENT/
-          #    FL_PAWN_FAKECLIENT (промежуточные августовские коммиты не собираются);
-          #  - hl2sdk cs2 окт-2025: уже новый NetworkStateChangedData API (нужен
-          #    schemasystem.cpp из SchemaEntity), но ещё есть tier1/generichash.cpp
-          #    и lib/linux64/tier1.a (удалены только 2026-07-17), жёстко нужные
+          # Пины на середину октября 2025 (alliedmodders hl2sdk):
+          #  - as_checkcheats.cpp последний раз менялся 2025-08-01 (OnCheckTransmit +
+          #    CCheckTransmitInfoHack), поэтому SchemaEntity нужен HEAD окт-2025:
+          #    только он даёт CCheckTransmitInfoHack и сам определяет
+          #    FL_CONTROLLER_FAKECLIENT / FL_PAWN_FAKECLIENT;
+          #  - hl2sdk cs2 окт-2025: новый API NetworkStateChangedData(uint32,int32,
+          #    ChangeAccessorFieldPathIndex_t), но ещё есть tier1/generichash.cpp и
+          #    lib/linux64/tier1.a (удалены лишь 2026-07-17), жёстко нужные
           #    CheckCheats/AMBuildScript + manifests/cs2.json;
-          #  - metamod-source той же даты.
+          #  - SchemaEntity HEAD писан под форк "Wender SDK" (тип NetworkStateChanged_t);
+          #    у alliedmodders этот же тип называется NetworkStateChangedData с той же
+          #    сигнатурой конструктора — приводим sed'ом (см. ниже).
           HL2SDK_CS2_REF: 84a823db042b49d2f6934b770dafbf3a366cef26   # 2025-10-15
           MMSOURCE_REF: 4399ff0fd4ad7a6620f6763afe6fc0e30005496a     # 2025-10-15
           SCHEMAENTITY_REF: e7965b3c83ec684d44584ee6457c5482ee5d9db1 # 2025-10-17
@@ -65,6 +66,9 @@ jobs:
           git clone https://github.com/pisex/SchemaEntity.git
           git -C SchemaEntity fetch --depth 1 origin "$SCHEMAENTITY_REF"
           git -C SchemaEntity checkout "$SCHEMAENTITY_REF"
+          # Wender SDK -> alliedmodders hl2sdk: одинаковый тип под разными именами.
+          sed -i 's/\bNetworkStateChanged_t\b/NetworkStateChangedData/g' SchemaEntity/schemasystem.cpp
+          grep -n "NetworkStateChangedData" SchemaEntity/schemasystem.cpp || true
           cd "${{ github.workspace }}"
 
       - name: Build CheckCheats
