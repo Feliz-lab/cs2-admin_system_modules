@@ -23,11 +23,14 @@ jobs:
 
       - name: Set up dependencies
         env:
-          # Репозиторий заморожен на релизе v16 (2025-03-27). Пинним SDK на тот период:
-          # hl2sdk cs2 позже (2026-07-17) удалил tier1/generichash.cpp и tier1.a,
-          # которые жёстко прописаны в CheckCheats/AMBuildScript и manifests/cs2.json.
-          HL2SDK_CS2_REF: 17aca049830c2e0dbe049f5da44de03d07d4b0dc
-          MMSOURCE_REF: 406383afe6bc1d85b0280337dffccaf720f9f4b1
+          # Репозиторий заморожен ~на релизе v16 (март 2025). Пинним весь набор
+          # зависимостей на январь–февраль 2025, иначе:
+          #  - hl2sdk cs2 позже удалил tier1/generichash.cpp и tier1.a (жёстко нужны
+          #    CheckCheats/AMBuildScript + manifests/cs2.json);
+          #  - свежий pisex/SchemaEntity требует новый API hl2sdk (NetworkStateChanged_t).
+          HL2SDK_CS2_REF: 680daff5f16754a605455b6476699901cb0483c6   # 2025-01-23
+          MMSOURCE_REF: ccce734e121a6086cb45773d6d3d754e81a81dbb     # 2025-01-17
+          SCHEMAENTITY_REF: 5418de7d3c5e3bed00aac3cc175fa74066792bab # 2025-02-11
         run: |
           set -eux
           export DEBIAN_FRONTEND=noninteractive
@@ -39,7 +42,7 @@ jobs:
           mkdir external
           cd external
 
-          git clone --recursive --branch master --single-branch https://github.com/alliedmodders/metamod-source.git
+          git clone --branch master --single-branch https://github.com/alliedmodders/metamod-source.git
           git -C metamod-source fetch --depth 1 origin "$MMSOURCE_REF"
           git -C metamod-source checkout "$MMSOURCE_REF"
           git -C metamod-source submodule update --init --recursive
@@ -54,6 +57,8 @@ jobs:
           mkdir -p samples
           cd samples
           git clone https://github.com/pisex/SchemaEntity.git
+          git -C SchemaEntity fetch --depth 1 origin "$SCHEMAENTITY_REF"
+          git -C SchemaEntity checkout "$SCHEMAENTITY_REF"
           cd "${{ github.workspace }}"
 
       - name: Build CheckCheats
