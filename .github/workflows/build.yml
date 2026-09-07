@@ -22,6 +22,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up dependencies
+        env:
+          # Репозиторий заморожен на релизе v16 (2025-03-27). Пинним SDK на тот период:
+          # hl2sdk cs2 позже (2026-07-17) удалил tier1/generichash.cpp и tier1.a,
+          # которые жёстко прописаны в CheckCheats/AMBuildScript и manifests/cs2.json.
+          HL2SDK_CS2_REF: 17aca049830c2e0dbe049f5da44de03d07d4b0dc
+          MMSOURCE_REF: 406383afe6bc1d85b0280337dffccaf720f9f4b1
         run: |
           set -eux
           export DEBIAN_FRONTEND=noninteractive
@@ -32,8 +38,18 @@ jobs:
           python3 -m pip install ./ambuild
           mkdir external
           cd external
+
           git clone --recursive --branch master --single-branch https://github.com/alliedmodders/metamod-source.git
-          git clone --recursive --branch cs2 --single-branch https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+          git -C metamod-source fetch --depth 1 origin "$MMSOURCE_REF"
+          git -C metamod-source checkout "$MMSOURCE_REF"
+          git -C metamod-source submodule update --init --recursive
+
+          git clone --branch cs2 --single-branch https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+          git -C hl2sdk-cs2 fetch --depth 1 origin "$HL2SDK_CS2_REF"
+          git -C hl2sdk-cs2 checkout "$HL2SDK_CS2_REF"
+          git -C hl2sdk-cs2 submodule update --init --recursive || true
+          test -f hl2sdk-cs2/tier1/generichash.cpp
+
           cd ../..
           mkdir -p samples
           cd samples
