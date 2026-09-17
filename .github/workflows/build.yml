@@ -72,10 +72,13 @@ jobs:
 
               # python3-pip в apt sniper часто нет/битый - ensurepip, а если и его
               # нет (urllib3/ssl-сборка без pip) - тащим get-pip.py вручную.
+              PYVER="$(python3 -c "import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")")"
               python3 -m pip --version >/dev/null 2>&1 \
                 || python3 -m ensurepip --upgrade >/dev/null 2>&1 \
-                || { curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
-                     && python3 /tmp/get-pip.py --quiet; }
+                || { curl -sSL "https://bootstrap.pypa.io/get-pip.py" -o /tmp/get-pip.py \
+                     && (python3 /tmp/get-pip.py --quiet \
+                         || (curl -sSL "https://bootstrap.pypa.io/pip/$PYVER/get-pip.py" -o /tmp/get-pip.py \
+                             && python3 /tmp/get-pip.py --quiet)); }
               python3 -m pip --version
 
               git config --global --add safe.directory "*"
