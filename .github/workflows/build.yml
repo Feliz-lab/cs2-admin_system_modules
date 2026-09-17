@@ -1,13 +1,20 @@
 # Кладётся в форк Pisex/cs2-admin_system_modules как .github/workflows/build.yml
-# Собирает CheckCheats ВНУТРИ контейнера ubuntu:20.04 (glibc 2.31), а не на самом
-# раннере (тот теперь ubuntu-22.04+/glibc 2.35+). Раннер сам по себе только водит
-# Docker — ubuntu-20.04 как ОС раннера GitHub уже не даёт, а как container: job
-# образ работает как раньше и содержит нужный (старый) glibc.
 #
-# Почему это важно: бинарник, слинкованный на glibc >= 2.32, откажется грузиться
-# на игровом сервере со старым glibc ("GLIBC_2.32 not found") — именно это и
-# сломало живой as_checkcheats.so на сервере. Ориганильный CI Pisex использовал
-# ubuntu-20.04 (glibc 2.31) не просто так — это и есть цель совместимости.
+# История промахов (по возрастанию точности среды):
+#  1) ubuntu-22.04 напрямую -> .so требовал GLIBC_2.32, которого нет на игровом
+#     сервере ("GLIBC_2.32' not found").
+#  2) container: ubuntu:20.04 -> глибц ок, но собранный .so падал в рантайме на
+#     "undefined symbol: g_bUpdateStringTokenDatabase" — эта переменная реально
+#     живёт в прекомпилированных lib/linux64/{tier1,interfaces}.a из hl2sdk,
+#     а Ubuntu 20.04 (не тот тулчейн/ABI, каким Valve собирает свой SDK) их
+#     резолвит не так, как надо.
+#  3) (эта версия) Собираем внутри официального Steam Runtime "sniper" —
+#     именно в нём Valve собирает сам CS2 и hl2sdk-cs2, это гарантированно
+#     совпадающий ABI. Ровно так же уже собираются другие плагины этого же
+#     проекта под тот же боевой сервер (VoteSystem-metamod, cs2-anticheat и
+#     т.д. - Feliz-lab). Заодно берём metamod-source на коммит ПЕРЕД тем, где
+#     убрали SourceHook и подняли PLAPI до 18 (боевой сервер — Metamod
+#     2.0.0-dev+1459, PLAPI 17; более новый плагин он отвергнет).
 name: Build CheckCheats (PcCheckMenu)
 
 on:
@@ -16,111 +23,112 @@ on:
     paths-ignore: [ 'README.md' ]
     branches: [ main, pccheckmenu ]
 
+env:
+  SNIPER_IMAGE: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+  # metamod-source: a12f3cd5d7~1 - коммит перед удалением SourceHook (PLAPI 17,
+  # совпадает с боевым Metamod 1459). Тот же пин что у VoteSystem-metamod.
+  MMSOURCE_REF: 7ec0f16948ab3a0910a98b4ac10e1c0e360d5339
+  # hl2sdk cs2: последний коммит ПЕРЕД тем как 2026-07-17 убрали
+  # tier1/generichash.cpp и lib/linux64/tier1.a (их жёстко требуют
+  # CheckCheats/AMBuildScript и manifests/cs2.json) - максимально свежий ABI
+  # в рамках этого ограничения.
+  HL2SDK_CS2_REF: daf6a2275c34dc99f2fc421e6decb37c25b08587
+  # pisex/SchemaEntity: HEAD - единственный коммит, который одновременно даёт
+  # CCheckTransmitInfoHack (нужен OnCheckTransmit в as_checkcheats.cpp) и сам
+  # определяет FL_CONTROLLER_FAKECLIENT/FL_PAWN_FAKECLIENT. Писан под форк
+  # "Wender SDK" - имена под alliedmodders приводим sed'ом ниже.
+  SCHEMAENTITY_REF: e7965b3c83ec684d44584ee6457c5482ee5d9db1
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
-    env:
-      DEBIAN_FRONTEND: noninteractive
-
     steps:
-      - name: Bootstrap git (actions/checkout needs it inside the bare container)
+      - uses: actions/checkout@v4
+
+      - name: Загрузка образа Steam Runtime
+        run: docker pull "$SNIPER_IMAGE"
+
+      - name: Сборка в контейнере sniper
         run: |
-          set -eux
-          # Ubuntu 20.04 достиг EOL стандартной поддержки — обычные зеркала архива
-          # могут 404'иться, переключаемся на old-releases на всякий случай.
-          sed -i \
-            -e 's|archive.ubuntu.com/ubuntu|old-releases.ubuntu.com/ubuntu|g' \
-            -e 's|security.ubuntu.com/ubuntu|old-releases.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list || true
-          apt-get update -qy || (sed -i \
-            -e 's|old-releases.ubuntu.com/ubuntu|archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list && apt-get update -qy)
-          apt-get install -y git ca-certificates
+          set -euxo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            --entrypoint bash \
+            "$SNIPER_IMAGE" -c '
+              set -euxo pipefail
+              export DEBIAN_FRONTEND=noninteractive
 
-      # ВАЖНО: внутри container: job нельзя использовать expression-контекст
-      # ${{ github.workspace }} для путей — раннер вычисляет его ДО входа в
-      # контейнер, и получается путь хоста (/home/runner/work/...), которого
-      # внутри контейнера не существует (там смонтировано как /__w/...).
-      # Правильный путь — переменная окружения $GITHUB_WORKSPACE, её сам
-      # Actions runner подставляет уже актуальной ВНУТРИ контейнера.
-      - name: Resolve workspace-relative paths
+              # В sniper apt-метаданные иногда просрочены - как в VoteSystem-metamod,
+              # игнорируем Valid-Until и не валим шаг если что-то уже есть в образе.
+              apt-get update -qq -o Acquire::Check-Valid-Until=false || true
+              apt-get install -y --no-install-recommends \
+                git ca-certificates python3 python3-pip python3-venv zip clang lld \
+                >/dev/null 2>&1 || true
+
+              command -v git    >/dev/null || { echo "::error::git недоступен в sniper"; exit 1; }
+              command -v python3 >/dev/null || { echo "::error::python3 недоступен в sniper"; exit 1; }
+              command -v g++    >/dev/null || command -v clang++ >/dev/null || { echo "::error::нет C++ компилятора"; exit 1; }
+
+              git config --global --add safe.directory "*"
+
+              # --- SDK ---
+              mkdir -p /src/external
+              cd /src/external
+              git clone --quiet --branch master --single-branch https://github.com/alliedmodders/metamod-source.git
+              git -C metamod-source fetch --quiet --depth 1 origin "'"$MMSOURCE_REF"'"
+              git -C metamod-source checkout --quiet "'"$MMSOURCE_REF"'"
+              git -C metamod-source submodule update --init --recursive --quiet
+
+              git clone --quiet --branch cs2 --single-branch https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
+              git -C hl2sdk-cs2 fetch --quiet --depth 1 origin "'"$HL2SDK_CS2_REF"'"
+              git -C hl2sdk-cs2 checkout --quiet "'"$HL2SDK_CS2_REF"'"
+              git -C hl2sdk-cs2 submodule update --init --recursive --quiet || true
+              test -f hl2sdk-cs2/tier1/generichash.cpp
+
+              # samples/ должен лежать РЯДОМ с CheckCheats на уровень выше репозитория
+              # (AMBuilder берёт "../../samples/SchemaEntity" от CheckCheats/) - кладём
+              # его вне /src, в корень контейнера, арифметика путей совпадает 1:1.
+              mkdir -p /samples
+              cd /samples
+              git clone --quiet https://github.com/pisex/SchemaEntity.git
+              git -C SchemaEntity fetch --quiet --depth 1 origin "'"$SCHEMAENTITY_REF"'"
+              git -C SchemaEntity checkout --quiet "'"$SCHEMAENTITY_REF"'"
+              # Wender SDK -> alliedmodders hl2sdk: те же сущности под другими именами.
+              grep -rlZ -e "NetworkStateChanged_t" -e "FL_CONTROLLER_FAKECLIENT" -e "FL_PAWN_FAKECLIENT" SchemaEntity \
+                | xargs -0 -r sed -i \
+                  -e "s/\bNetworkStateChanged_t\b/NetworkStateChangedData/g" \
+                  -e "s/\bFL_CONTROLLER_FAKECLIENT\b/FL_FAKECLIENT/g" \
+                  -e "s/\bFL_PAWN_FAKECLIENT\b/FL_FAKECLIENT/g"
+              ! grep -rn -e "NetworkStateChanged_t" -e "FL_CONTROLLER_FAKECLIENT" -e "FL_PAWN_FAKECLIENT" SchemaEntity
+
+              python3 -m pip install --quiet --upgrade pip setuptools wheel
+              git clone --quiet https://github.com/alliedmodders/ambuild.git /tmp/ambuild
+              python3 -m pip install --quiet /tmp/ambuild
+
+              # --- Build ---
+              cd /src/CheckCheats
+              mkdir -p build && cd build
+              CC=clang CXX=clang++ python3 ../configure.py -s cs2 --targets x86_64 --enable-optimize \
+                --hl2sdk-manifests=./hl2sdk-manifests \
+                --mms_path=/src/external/metamod-source \
+                --hl2sdk-root=/src/external
+              ambuild
+
+              chown -R "$(stat -c %u /src)":"$(stat -c %g /src)" /src/CheckCheats/build
+            '
+
+      - name: Сводка по бинарнику
         run: |
-          set -eux
-          echo "HL2SDK_ROOT=$GITHUB_WORKSPACE/external" >> "$GITHUB_ENV"
-          echo "MMS_PATH=$GITHUB_WORKSPACE/external/metamod-source" >> "$GITHUB_ENV"
-          echo "MANIFEST_PATH=$GITHUB_WORKSPACE/external/metamod-source/hl2sdk-manifests" >> "$GITHUB_ENV"
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up dependencies
-        env:
-          # Те же пины что и раньше (за версии hl2sdk/metamod/SchemaEntity этот шаг
-          # не отвечает — это отдельная история совместимости API, см. коммиты).
-          HL2SDK_CS2_REF: 84a823db042b49d2f6934b770dafbf3a366cef26   # 2025-10-15
-          MMSOURCE_REF: 4399ff0fd4ad7a6620f6763afe6fc0e30005496a     # 2025-10-15
-          SCHEMAENTITY_REF: e7965b3c83ec684d44584ee6457c5482ee5d9db1 # 2025-10-17
-        run: |
-          set -eux
-          apt-get install -y clang lld binutils python3 python3-pip zip
-          python3 -m pip install --upgrade pip setuptools wheel
-          git clone https://github.com/alliedmodders/ambuild.git
-          python3 -m pip install ./ambuild
-          mkdir external
-          cd external
-
-          git clone --branch master --single-branch https://github.com/alliedmodders/metamod-source.git
-          git -C metamod-source fetch --depth 1 origin "$MMSOURCE_REF"
-          git -C metamod-source checkout "$MMSOURCE_REF"
-          git -C metamod-source submodule update --init --recursive
-
-          git clone --branch cs2 --single-branch https://github.com/alliedmodders/hl2sdk.git hl2sdk-cs2
-          git -C hl2sdk-cs2 fetch --depth 1 origin "$HL2SDK_CS2_REF"
-          git -C hl2sdk-cs2 checkout "$HL2SDK_CS2_REF"
-          git -C hl2sdk-cs2 submodule update --init --recursive || true
-          test -f hl2sdk-cs2/tier1/generichash.cpp
-
-          cd ../..
-          mkdir -p samples
-          cd samples
-          git clone https://github.com/pisex/SchemaEntity.git
-          git -C SchemaEntity fetch --depth 1 origin "$SCHEMAENTITY_REF"
-          git -C SchemaEntity checkout "$SCHEMAENTITY_REF"
-          # Wender SDK -> alliedmodders hl2sdk: те же сущности под другими именами.
-          grep -rlZ -e 'NetworkStateChanged_t' -e 'FL_CONTROLLER_FAKECLIENT' -e 'FL_PAWN_FAKECLIENT' SchemaEntity \
-            | xargs -0 -r sed -i \
-              -e 's/\bNetworkStateChanged_t\b/NetworkStateChangedData/g' \
-              -e 's/\bFL_CONTROLLER_FAKECLIENT\b/FL_FAKECLIENT/g' \
-              -e 's/\bFL_PAWN_FAKECLIENT\b/FL_FAKECLIENT/g'
-          ! grep -rn -e 'NetworkStateChanged_t' -e 'FL_CONTROLLER_FAKECLIENT' -e 'FL_PAWN_FAKECLIENT' SchemaEntity
-          cd "$GITHUB_WORKSPACE"
-
-      - name: Build CheckCheats
-        env:
-          CC: clang
-          CXX: clang++
-        run: |
-          set -eux
-          cd CheckCheats
-          mkdir -p build
-          cd build
-          python3 ../configure.py -s cs2 --targets x86_64 --enable-optimize \
-            --hl2sdk-manifests=./hl2sdk-manifests \
-            --mms_path="$MMS_PATH" \
-            --hl2sdk-root="$HL2SDK_ROOT"
-          ambuild
-
-      - name: Show build outputs + glibc requirement
-        run: |
-          set -eux
-          find CheckCheats/build -name '*.so' -print -exec ls -la {} \;
+          set -euxo pipefail
           SO=$(find CheckCheats/build/package -name 'as_checkcheats.so')
-          echo "Max GLIBC symbol version required by $SO:"
-          objdump -T "$SO" | grep -o 'GLIBC_[0-9.]*' | sort -V -u | tail -5
+          ls -la "$SO"
+          file "$SO"
+          echo "GLIBC:"; objdump -T "$SO" | grep -o 'GLIBC_[0-9.]*' | sort -V -u | tail -5
+          echo "Undefined symbols (справочно, часть из них резолвится игрой в рантайме):"
+          objdump -T "$SO" | awk '$2=="*UND*" && $NF!~"@" {print $NF}' | sort -u | head -40
 
-      - name: Upload artifact
+      - name: Публикация артефакта
         uses: actions/upload-artifact@v4
         with:
           name: CheckCheats-so
