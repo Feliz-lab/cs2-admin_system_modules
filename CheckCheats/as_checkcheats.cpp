@@ -3,12 +3,23 @@
 #include "metamod_oslink.h"
 #include "schemasystem/schemasystem.h"
 
+// [PcCheckMenu] Красная info-панель (CS_UM_VGUIMenu) вызванному игроку -
+// тот же нативный usermessage, которым CS:GO/CS2 всегда рисовали MOTD/"вас
+// замьютили"-панели; клиент сам рисует стандартный красный фон, нам нужно
+// только отправить title/msg/time.
+#include "cstrike15_usermessages.pb.h"
+#include "networksystem/inetworkmessages.h"
+#include "engine/igameeventsystem.h"
+#include "irecipientfilter.h"
+
 CheckCheats g_Sample;
 PLUGIN_EXPOSE(CheckCheats, g_Sample);
 IVEngineServer2* engine = nullptr;
 CGameEntitySystem* g_pGameEntitySystem = nullptr;
 CEntitySystem* g_pEntitySystem = nullptr;
 CGlobalVars *gpGlobals = nullptr;
+INetworkMessages* g_pNetworkMessages = nullptr;
+IGameEventSystem* g_gameEventSystem = nullptr;
 
 IUtilsApi* g_pUtils;
 IMenusApi* g_pMenus;
@@ -72,6 +83,56 @@ int g_iCheckTransmit;
 
 SH_DECL_MANUALHOOK8_void(CheckTransmit, 13, 0, 0, ISource2GameEntities*, CCheckTransmitInfoHack**, uint32_t, CBitVec<16384>&, CBitVec<16384>&, const Entity2Networkable_t**, const uint16*, uint32_t);
 
+// [PcCheckMenu] Фильтр на одного адресата для PostEventAbstract.
+class CSingleRecipientFilter : public IRecipientFilter
+{
+public:
+	explicit CSingleRecipientFilter(int iSlot) { m_Recipients.Set(iSlot); }
+	NetChannelBufType_t GetNetworkBufType(void) const override { return BUF_RELIABLE; }
+	bool IsInitMessage(void) const override { return false; }
+	const CPlayerBitVec &GetRecipients(void) const override { return m_Recipients; }
+	CPlayerSlot GetPredictedPlayerSlot(void) const override { return -1; }
+private:
+	CPlayerBitVec m_Recipients;
+};
+
+// [PcCheckMenu] Красная info-панель (стандартный вид, рисует сам клиент) -
+// не кликабельна, закрывается сама через iSeconds. Кнопки !contact/"Отказ"
+// остаются на SuspectMenu, это только заметная заставка-предупреждение.
+void ShowSuspectBanner(int iSlot, const char* szTitle, const char* szMsg, int iSeconds)
+{
+	if(!g_pNetworkMessages || !g_gameEventSystem) return;
+
+	INetworkMessageInternal* pNetMsg = g_pNetworkMessages->FindNetworkMessagePartial("VGUIMenu");
+	if(!pNetMsg) return;
+
+	CNetMessagePB<CCSUsrMsg_VGUIMenu>* pData = pNetMsg->AllocateMessage()->ToPB<CCSUsrMsg_VGUIMenu>();
+	pData->set_name("info");
+	pData->set_show(true);
+
+	auto* pType = pData->add_keys();
+	pType->set_name("type");
+	pType->set_value("1");
+
+	auto* pTitle = pData->add_keys();
+	pTitle->set_name("title");
+	pTitle->set_value(szTitle);
+
+	auto* pMsg = pData->add_keys();
+	pMsg->set_name("msg");
+	pMsg->set_value(szMsg);
+
+	char szTime[16];
+	g_SMAPI->Format(szTime, sizeof(szTime), "%d", iSeconds);
+	auto* pTime = pData->add_keys();
+	pTime->set_name("time");
+	pTime->set_value(szTime);
+
+	CSingleRecipientFilter filter(iSlot);
+	g_gameEventSystem->PostEventAbstract(-1, false, &filter, pNetMsg, pData, 0);
+
+	delete pData;
+}
 
 void CheckMenu(int iSlot);
 void SuspectMenu(int iSlot); // [PcCheckMenu] меню у вызванного на проверку игрока
@@ -106,6 +167,11 @@ void SetStage(int iSlot, int iStage)
 		{
 			g_pUtils->PrintToChat(g_iTarget[iSlot], g_pAdmin->GetTranslation("CC_Input_Contact"), g_szContactCommand, g_mSocials[g_szSocial[iSlot]].sExample.c_str());
 			SuspectMenu(g_iTarget[iSlot]); // [PcCheckMenu] показать меню проверяемому
+			// [PcCheckMenu] красная заставка-предупреждение, текст из фраз (можно менять без пересборки .so)
+			ShowSuspectBanner(g_iTarget[iSlot],
+				g_pAdmin->GetTranslation("CC_Suspect_BannerTitle"),
+				g_pAdmin->GetTranslation("CC_Suspect_BannerMsg"),
+				15);
 		}
 		g_pUtils->PrintToChat(iSlot, g_pAdmin->GetTranslation("CC_Input_Contact"), g_szContactCommand, g_mSocials[g_szSocial[iSlot]].sExample.c_str());
 	}
@@ -228,6 +294,9 @@ bool CheckCheats::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, b
 	GET_V_IFACE_CURRENT(GetEngineFactory, engine, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
 	GET_V_IFACE_CURRENT(GetFileSystemFactory, g_pFullFileSystem, IFileSystem, FILESYSTEM_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetServerFactory, g_pSource2GameEntities, ISource2GameEntities, SOURCE2GAMEENTITIES_INTERFACE_VERSION);
+	// [PcCheckMenu] для ShowSuspectBanner() - отправка CS_UM_VGUIMenu.
+	GET_V_IFACE_ANY(GetEngineFactory, g_gameEventSystem, IGameEventSystem, GAMEEVENTSYSTEM_INTERFACE_VERSION);
+	GET_V_IFACE_ANY(GetEngineFactory, g_pNetworkMessages, INetworkMessages, NETWORKMESSAGES_INTERFACE_VERSION);
 
 	// SH_ADD_HOOK(ISource2GameEntities, CheckTransmit, g_pSource2GameEntities, SH_MEMBER(this, &CheckCheats::OnCheckTransmit), true);
 	g_iCheckTransmit = SH_ADD_MANUALDVPHOOK(CheckTransmit, g_pSource2GameEntities, SH_MEMBER(this, &CheckCheats::OnCheckTransmit), true);
