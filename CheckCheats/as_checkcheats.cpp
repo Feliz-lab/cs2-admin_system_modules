@@ -18,7 +18,11 @@ IVEngineServer2* engine = nullptr;
 CGameEntitySystem* g_pGameEntitySystem = nullptr;
 CEntitySystem* g_pEntitySystem = nullptr;
 CGlobalVars *gpGlobals = nullptr;
-INetworkMessages* g_pNetworkMessages = nullptr;
+// [PcCheckMenu] g_pNetworkMessages НЕ объявляем сами - inetworkmessages.h уже
+// делает `DECLARE_TIER2_INTERFACE(INetworkMessages, g_pNetworkMessages)`
+// (extern-объявление, само хранилище зашито в lib/linux64/interfaces.a);
+// свой global здесь даёт "multiple definition" на линковке. Просто
+// используем существующий через GET_V_IFACE_ANY ниже.
 IGameEventSystem* g_gameEventSystem = nullptr;
 
 IUtilsApi* g_pUtils;
