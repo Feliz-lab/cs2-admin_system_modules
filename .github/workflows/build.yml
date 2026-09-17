@@ -22,9 +22,6 @@ jobs:
     container:
       image: ubuntu:20.04
     env:
-      HL2SDK_ROOT: "${{ github.workspace }}/external"
-      MMS_PATH: "${{ github.workspace }}/external/metamod-source"
-      MANIFEST_PATH: "${{ github.workspace }}/external/metamod-source/hl2sdk-manifests"
       DEBIAN_FRONTEND: noninteractive
 
     steps:
@@ -41,6 +38,19 @@ jobs:
             -e 's|old-releases.ubuntu.com/ubuntu|archive.ubuntu.com/ubuntu|g' \
             /etc/apt/sources.list && apt-get update -qy)
           apt-get install -y git ca-certificates
+
+      # ВАЖНО: внутри container: job нельзя использовать expression-контекст
+      # ${{ github.workspace }} для путей — раннер вычисляет его ДО входа в
+      # контейнер, и получается путь хоста (/home/runner/work/...), которого
+      # внутри контейнера не существует (там смонтировано как /__w/...).
+      # Правильный путь — переменная окружения $GITHUB_WORKSPACE, её сам
+      # Actions runner подставляет уже актуальной ВНУТРИ контейнера.
+      - name: Resolve workspace-relative paths
+        run: |
+          set -eux
+          echo "HL2SDK_ROOT=$GITHUB_WORKSPACE/external" >> "$GITHUB_ENV"
+          echo "MMS_PATH=$GITHUB_WORKSPACE/external/metamod-source" >> "$GITHUB_ENV"
+          echo "MANIFEST_PATH=$GITHUB_WORKSPACE/external/metamod-source/hl2sdk-manifests" >> "$GITHUB_ENV"
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -85,7 +95,7 @@ jobs:
               -e 's/\bFL_CONTROLLER_FAKECLIENT\b/FL_FAKECLIENT/g' \
               -e 's/\bFL_PAWN_FAKECLIENT\b/FL_FAKECLIENT/g'
           ! grep -rn -e 'NetworkStateChanged_t' -e 'FL_CONTROLLER_FAKECLIENT' -e 'FL_PAWN_FAKECLIENT' SchemaEntity
-          cd "${{ github.workspace }}"
+          cd "$GITHUB_WORKSPACE"
 
       - name: Build CheckCheats
         env:
