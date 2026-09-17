@@ -8,26 +8,10 @@ for sdk_target in MMSPlugin.sdk_targets:
   cxx.cxxflags += ['-Wno-invalid-offsetof']
   binary = MMSPlugin.HL2Library(builder, cxx, MMSPlugin.plugin_name, sdk)
 
-  # [PcCheckMenu] доп. include-пути для cstrike15_usermessages.proto и его
-  # транзитивных импортов (лежат не в путях из manifests/cs2.json).
-  sdk_target.protoc.includes += [
-    os.path.join(sdk['path'], 'game', 'shared', 'cstrike15'),
-    os.path.join(sdk['path'], 'gcsdk'),
-  ]
-
   binary.custom = [builder.tools.Protoc(protoc = sdk_target.protoc, sources = [
-    os.path.join(sdk['path'], 'common', 'network_connection.proto'),
-    # [PcCheckMenu] нужны для CS_UM_VGUIMenu (баннер вызванному игроку) -
-    # закрытие транзитивных import'ов cstrike15_usermessages.proto.
-    os.path.join(sdk['path'], 'common', 'networkbasetypes.proto'),
-    os.path.join(sdk['path'], 'common', 'valveextensions.proto'),
-    os.path.join(sdk['path'], 'common', 'engine_gcmessages.proto'),
-    os.path.join(sdk['path'], 'gcsdk', 'steammessages.proto'),
-    os.path.join(sdk['path'], 'gcsdk', 'gcsdk_gcmessages.proto'),
-    os.path.join(sdk['path'], 'game', 'shared', 'cstrike15', 'cstrike15_gcmessages.proto'),
-    os.path.join(sdk['path'], 'game', 'shared', 'cstrike15', 'cstrike15_usermessages.proto'),
+    os.path.join(sdk['path'], 'common', 'network_connection.proto')
   ])]
-
+  
   binary.compiler.cxxincludes += [
     os.path.join(builder.sourcePath, 'include'),
     os.path.join(builder.sourcePath, '..', '..', 'samples', 'SchemaEntity'),
