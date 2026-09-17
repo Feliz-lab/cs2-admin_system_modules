@@ -105,20 +105,10 @@ private:
 // остаются на SuspectMenu, это только заметная заставка-предупреждение.
 void ShowSuspectBanner(int iSlot, const char* szTitle, const char* szMsg, int iSeconds)
 {
-	if(!g_pNetworkMessages || !g_gameEventSystem)
-	{
-		ConColorMsg(Color(255, 0, 0, 255), "[PcCheckMenu] ShowSuspectBanner: интерфейсы не получены (g_pNetworkMessages=%p g_gameEventSystem=%p)\n", (void*)g_pNetworkMessages, (void*)g_gameEventSystem);
-		return;
-	}
+	if(!g_pNetworkMessages || !g_gameEventSystem) return;
 
 	INetworkMessageInternal* pNetMsg = g_pNetworkMessages->FindNetworkMessagePartial("VGUIMenu");
-	if(!pNetMsg)
-	{
-		ConColorMsg(Color(255, 0, 0, 255), "[PcCheckMenu] ShowSuspectBanner: FindNetworkMessagePartial(\"VGUIMenu\") вернул null\n");
-		return;
-	}
-
-	ConColorMsg(Color(0, 255, 0, 255), "[PcCheckMenu] ShowSuspectBanner: отправляю панель slot=%d\n", iSlot);
+	if(!pNetMsg) return;
 
 	CNetMessagePB<CCSUsrMsg_VGUIMenu>* pData = pNetMsg->AllocateMessage()->ToPB<CCSUsrMsg_VGUIMenu>();
 	pData->set_name("info");
@@ -311,7 +301,6 @@ bool CheckCheats::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, b
 	// [PcCheckMenu] для ShowSuspectBanner() - отправка CS_UM_VGUIMenu.
 	GET_V_IFACE_ANY(GetEngineFactory, g_gameEventSystem, IGameEventSystem, GAMEEVENTSYSTEM_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetEngineFactory, g_pNetworkMessages, INetworkMessages, NETWORKMESSAGES_INTERFACE_VERSION);
-	ConColorMsg(Color(0, 255, 255, 255), "[PcCheckMenu] Load(): g_gameEventSystem=%p g_pNetworkMessages=%p\n", (void*)g_gameEventSystem, (void*)g_pNetworkMessages);
 
 	// SH_ADD_HOOK(ISource2GameEntities, CheckTransmit, g_pSource2GameEntities, SH_MEMBER(this, &CheckCheats::OnCheckTransmit), true);
 	g_iCheckTransmit = SH_ADD_MANUALDVPHOOK(CheckTransmit, g_pSource2GameEntities, SH_MEMBER(this, &CheckCheats::OnCheckTransmit), true);
